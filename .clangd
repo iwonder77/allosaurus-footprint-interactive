@@ -1,0 +1,32 @@
+# .clangd
+#
+# this configuration file is for LSP support in editors using clangd
+# (Neovim, VSCode with clangd extension, etc.)
+#
+# purpose: Suppresses false-positive errors that occur due to clangd's
+# incomplete understanding of Arduino's build system and header locations.
+#
+# NOTE: This file does NOT affect compilation - arduino-cli handles that.
+# It only improves the development experience in clangd-based editors.
+# Feel free to modify or ignore if using different tools.
+CompileFlags:
+  Add: 
+    - "-I./src"
+    - "-I."
+    - "-std=c++17"
+    - "-DESP32"
+    - "-DARDUINO_ARCH_ESP32"
+    - "-DARDUINO=10819"
+    - "-Wno-unknown-pragmas"
+    - "-xc++" # force C++ mode for all files
+  Remove:
+    - "-m*"
+    - "-f*"
+
+Diagnostics:
+  Suppress:
+    - "drv_unknown_argument"
+    - "pp_file_not_found" # some issues with including files and compiler readability
+    - "ovl_no_viable_function_in_call"
+    - "err_ovl_no_viable_function_in_call" # more issues with overload definitions 
+    - "ovl_no_viable_member_function_in_call" 
