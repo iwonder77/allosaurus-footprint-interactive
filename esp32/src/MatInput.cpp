@@ -10,6 +10,7 @@ void MatInput::begin(uint8_t pin) {
   pressed_ = false;
   event_ = false;
   t_mark_ = millis();
+  active_since_ = t_mark_;
 }
 
 bool MatInput::rawActive() const {
@@ -20,6 +21,37 @@ bool MatInput::rawActive() const {
 void MatInput::update() {
   const uint32_t now = millis();
   const bool active = rawActive();
+
+  // Track how long the line has been continuously active, independent of the
+  // press FSM: every inactive read pushes the "active since" mark forward, so
+  // while active (now - active_since_) is the uninterrupted active duration.
+  if (!active) {
+    active_since_ = now;
+  }
+
+  // Fault handling takes priority over the normal press logic.
+  if (state_ == State::Faulted) {
+    // Recover only after the line reads inactive continuously for the recovery
+    // window; any activity restarts that timer. On recovery, fall back through
+    // the boot-safe path so a lingering press still can't count.
+    if (active) {
+      t_mark_ = now;
+    } else if (now - t_mark_ >= MAT_FAULT_RECOVER_MS) {
+      state_ = State::WaitForRelease;
+      t_mark_ = now;
+    }
+    return;
+  }
+
+  // Enter the fault state if the line has been active far longer than any real
+  // stomp. Drop any in-flight press/event so a stuck mat goes fully quiet.
+  if (active && (now - active_since_ >= MAT_STUCK_MS)) {
+    pressed_ = false;
+    event_ = false;
+    t_mark_ = now;
+    state_ = State::Faulted;
+    return;
+  }
 
   switch (state_) {
   case State::WaitForRelease:
@@ -67,6 +99,10 @@ void MatInput::update() {
       t_mark_ = now; // begin cooldown
       state_ = State::WaitForRelease;
     }
+    break;
+
+  case State::Faulted:
+    // Handled above (before the switch); listed so the switch stays exhaustive.
     break;
   }
 }

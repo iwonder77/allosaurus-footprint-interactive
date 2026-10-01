@@ -1,8 +1,7 @@
 #pragma once
-#include <Arduino.h>
 
 /*
- * MatInput — non-blocking, debounced press detector for a single active-low
+ * MatInput,h — non-blocking, debounced press detector for a single active-low
  * optocoupler input (H11L1M open-collector output with an external pull-up:
  * idle = HIGH, mat stomped = LOW).
  *
@@ -25,7 +24,15 @@
  * BOOT SAFETY: begin() starts in WaitForRelease, so a mat already held down at
  * power-on never produces a spurious event; the detector arms only after a
  * confirmed clean release.
+ *
+ * FAIL-CLOSED DETECTION: if the input stays continuously active for
+ * MAT_STUCK_MS (a welded contact, stuck mat, or shorted line), the detector
+ * enters a Faulted state — pressed() and eventFired() go quiet and faulted()
+ * reads true. It auto-recovers once the line reads inactive for
+ * MAT_FAULT_RECOVER_MS.
  */
+
+#include <Arduino.h>
 class MatInput {
 public:
   // Bind this detector to a GPIO and reset its state machine. Call once in
@@ -43,22 +50,29 @@ public:
   // Debounced level: true while a stomp is held (after the debounce window).
   bool pressed() const { return pressed_; }
 
+  // True while the mat is flagged failed-closed (line stuck active). No stomp
+  // events fire while faulted; clears automatically on recovery.
+  bool faulted() const { return state_ == State::Faulted; }
+
   // Instantaneous, polarity-adjusted raw read. Handy for a startup self-test or
   // diagnostics before the state machine has armed.
   bool rawActive() const;
 
 private:
   enum class State : uint8_t {
-    WaitForRelease, // boot-safe entry + post-press cooldown; needs clean release
+    WaitForRelease, // boot-safe entry + post-press cooldown; needs clean
+                    // release
     Armed,          // idle, ready to detect a press
     PressDebounce,  // active edge seen; validating it is stable
     PressConfirm,   // debounced-pressed; waiting to reach minimum on-time
-    Held            // event fired; waiting for release
+    Held,           // event fired; waiting for release
+    Faulted         // line stuck active past MAT_STUCK_MS; awaiting recovery
   };
 
   uint8_t pin_ = 0;
   State state_ = State::WaitForRelease;
   bool pressed_ = false;
   bool event_ = false;
-  uint32_t t_mark_ = 0; // ms timestamp of the last significant transition
+  uint32_t t_mark_ = 0;       // ms timestamp of the last significant transition
+  uint32_t active_since_ = 0; // ms timestamp the line last went active
 };

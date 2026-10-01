@@ -15,6 +15,10 @@
  * The GPIO15 input is debounced with the same active-low state machine used by
  * the esp32 mat sketch (debounce window + minimum on-time + re-arm cooldown,
  * plus boot-safety), so contact/optocoupler chatter can't double-fire.
+ *
+ * PER-BOARD BUILD: each QuinLED board accompanies one mat's video, and its
+ * animation cycle equals that video's length, selected at COMPILE TIME with
+ * -DBOARD_ID=n (see the "Per-board video length" section below).
  */
 
 #include <FastLED.h>
@@ -32,15 +36,43 @@ const CRGB IDLE_COLOR = CRGB(255, 120, 40);
 const CRGB SNAKE_COLOR = CRGB::Red;
 
 // ===================== Snake animation ====================================
+
 constexpr float SNAKE_SPEED_PPS = 100.0f;  // leading-pixel speed, pixels/sec (higher = faster)
 constexpr uint8_t TARGET_FPS = 120;        // render cap
 
-// One trigger runs for TOTAL_CYCLE_MS: the snake wipe, the full-red hold, and
-// the closing fade back to idle. The hold is whatever time is left after the
-// wipe and fade, so wipe + hold + fade always sums to this total — raise
-// SNAKE_SPEED_PPS and the hold grows, lower it and the hold shrinks. Stomps on
-// MAT_INPUT_PIN are ignored for the whole cycle.
-constexpr uint32_t TOTAL_CYCLE_MS = 10000;
+// ===================== Per-board video length (compile-time) =============
+/*
+ * This board's animation runs for exactly one video length: the snake wipe, the
+ * full-red hold, and the closing fade back to idle. The hold is whatever time
+ * is left after the wipe and fade, so wipe + hold + fade always sums to
+ * TOTAL_CYCLE_MS (see the derivation below) — raise SNAKE_SPEED_PPS and the hold
+ * grows, lower it and the hold shrinks. Stomps on MAT_INPUT_PIN are ignored for
+ * the whole cycle.
+ *
+ * Each QuinLED board accompanies one mat's video, so TOTAL_CYCLE_MS is that
+ * video's length, chosen at COMPILE TIME. All three lengths live in the array
+ * below (index-matched to the mats, mirroring VIDEO_LENGTH_MS[] in the esp32
+ * sketch); BOARD_ID picks which one THIS board uses:
+ *
+ *   arduino-cli compile --build-property \
+ *     compiler.cpp.extra_flags=-DBOARD_ID=2 --fqbn esp32:esp32:esp32 quinled-diguno
+ *
+ * A plain build with no -DBOARD_ID defaults to mat 1, so it still compiles/runs.
+ */
+#ifndef BOARD_ID
+#define BOARD_ID 3
+#endif
+
+constexpr uint32_t VIDEO_LENGTHS_MS[] = {
+  12000,  // hatchling footprint mat clip length
+  16000,  // juvenile footprint mat clip length
+  21000,  // adult footprint mat clip length
+};
+static_assert(BOARD_ID >= 1 && BOARD_ID <= (int)(sizeof(VIDEO_LENGTHS_MS) / sizeof(VIDEO_LENGTHS_MS[0])),
+              "BOARD_ID must be 1..3; set it with -DBOARD_ID=n at compile time");
+
+// This board's animation cycle == its video length.
+constexpr uint32_t TOTAL_CYCLE_MS = VIDEO_LENGTHS_MS[BOARD_ID - 1];
 
 // Smooth cross-fade from full red back to the amber idle glow at the end of the
 // cycle. This is carved out of TOTAL_CYCLE_MS, not added on top.
@@ -49,11 +81,11 @@ constexpr uint32_t FADE_TO_IDLE_MS = 1000;
 // Nominal time for the head to travel the strip (head goes from pixel 0 to
 // NUM_LEDS-1 at SNAKE_SPEED_PPS); the rest of the budget is the full-red hold.
 constexpr uint32_t SNAKE_WIPE_MS =
-    (uint32_t)((NUM_LEDS - 1) / SNAKE_SPEED_PPS * 1000.0f);
+  (uint32_t)((NUM_LEDS - 1) / SNAKE_SPEED_PPS * 1000.0f);
 static_assert(SNAKE_WIPE_MS + FADE_TO_IDLE_MS <= TOTAL_CYCLE_MS,
               "Snake wipe + fade exceed TOTAL_CYCLE_MS; raise the total or speed");
 constexpr uint32_t FULL_RED_HOLD_MS =
-    TOTAL_CYCLE_MS - SNAKE_WIPE_MS - FADE_TO_IDLE_MS;
+  TOTAL_CYCLE_MS - SNAKE_WIPE_MS - FADE_TO_IDLE_MS;
 
 constexpr uint16_t FRAME_INTERVAL_MS = 1000 / TARGET_FPS;
 
